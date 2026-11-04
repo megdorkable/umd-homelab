@@ -50,7 +50,7 @@ export const authors = {
     Alvin_Lin: {
         name: 'Alvin Lin',
         title: 'Member',
-        // picture: '/images/avatars/alvin-lin.jpg',
+        picture: '/images/avatars/alvin-lin.jpg',
         url: 'https://suddenlysixam.club/authors/alvin-lin/',
     },
     Vincent_Barilaro: {
