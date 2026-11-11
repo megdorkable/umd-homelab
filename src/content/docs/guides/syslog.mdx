@@ -1,0 +1,226 @@
+---
+title: "Syslog"
+description: "Guide on setting up syslog with Grafana Loki and Nginx"
+date: 2026-11-11
+lastUpdated: 2026-11-11
+tags:
+    - network
+    - networkplus
+sidebar:
+  badge:
+      text: New
+      variant: success
+---
+
+import { Code, Aside, Tabs, TabItem, Steps, FileTree } from '@astrojs/starlight/components';
+import telegraf_conf from '@assets/files/projects/snmp-grafana/telegraf.conf?raw'
+import telegraf_dockerfile from '@assets/files/projects/snmp-grafana/Dockerfile?raw'
+import influxdb_env from '@assets/files/projects/snmp-grafana/env?raw'
+import compose_yml from '@assets/files/projects/snmp-grafana/compose.yml?raw'
+
+## What you will need
+
+This project assumes that you have already followed our [Raspberry Pi installation](/guides/raspberrypi-os) project, and have the resulting configured Raspberry Pi. If you are installing on different hardware or a different OS, these steps may not all be the same for you.
+
+### System Preparation
+
+Before continuing with the project, make sure your system is up to date.
+
+```bash title="Updating System"
+sudo apt update
+sudo apt upgrade -y
+```
+
+Install a text editor of your choice. Here we use `vim` as an example.
+
+```bash title="Installing Vim"
+sudo apt install vim
+```
+
+## Concepts
+
+### What is Log Management?
+
+Log management is the process of centrally collecting, parsing, and store log data. It can be used to trace issues across hosts and automatically trigger alerts based on the logs.
+
+### What is Syslog?
+Standard for message logging to allow different applications to generate messages to be parsed and stored by other systems. Syslog typically runs on port 514 commonly on UDP but also can be TCP depending on how critical the logs are.
+
+The message contains the following:
+
+* Facility: what type of system generated the message
+* Severity: from 0 (Emergency) to 7 (Debug)
+* Message: contains two parts the tag and content
+    * Tag: name of the program/process that generated the message
+    * Content: the actual log message with event details
+
+## Grafana Loki and Alloy
+There are multiple different possible syslog collection and management solutions such as Splunk, Graylog, and ELK.
+
+Grafana Loki Pros and Cons:
+* Pros:
+    * Lower storage requirements as only the labels are indexed
+    * Lower resource requirements during log ingestion due to less being indexed
+    * Easy Grafana integration for visualization and connections to other Grafana tools
+* Cons:
+    * Searches for a random word or broad searches may take longer and use more resources
+    * Limited log querying capabilities
+    * Too many labels can cause issues and increase resource requirements
+
+Grafana Alloy sits between the application (Nginx) and log collection server (Grafana Loki). It collects and forwards logs from Nginx to Loki to be parsed, stored, and queried. Other tools such as Rsyslog or the Splunk Universal Forwarder, can perform similar log collection for other colleciton servers.
+
+## Package Installation
+We will need the following packages for this project:
+* `Nginx`: Webserver which will be used to generate logs
+* `Grafana Alloy`: Collect and forward logs
+* `Grafana Loki`: Store and parse logs
+* `Grafana`: visualization and querying
+* A few other linux packages to download the Grafana repo
+
+Follow the instructions on [Grafana](https://grafana.com/docs/grafana/latest/setup-grafana/installation/debian/) website to add the stable Grafana repository
+
+Install the other Grafana packages:
+```bash title="Installing Loki and Alloy"
+sudo apt install grafana loki alloy
+```
+
+## Setting up the services
+### Verify Loki
+<Steps>
+1. Start the loki service
+    ```bash title="Start Loki Service"
+    sudo systemctl start loki
+    ```
+2. Check the status if reports an error go to step 4 otherwise skip to setting
+    ```bash title="Check Loki Status"
+    systemctl status loki
+    ```
+3. Check the journal for what the issue is
+    ```bash title="Check Loki Journal"
+    sudo journalctl -xeu loki
+    ```
+4. If the issue is failed to determine user credentials then create the loki user and go back to step 1
+    ```bash title="Create Loki User"
+    # -M do not create home directory
+    # -r create system account
+    # -s /sbin/nologin disables normal login
+    sudo useradd -M -r -s /sbin/nologin loki
+    ```
+</Steps>
+### Setting up Grafana
+<Steps>
+1. Check grafana service
+    ```bash title="Check Grafana Status"
+    systemctl status grafana-server
+    ```
+2. If it is inactive then start the service
+    ```bash title="Start Grafana Server"
+    sudo systemctl start grafana-server
+    ```
+3. Go to Grafana through the browser going to `localhost:3000` and log in with default credentials username `admin` and password `admin`
+
+4. Change the password to something you will remember
+
+5. Add the Loki source by going to connections -> add new connection -> Loki -> Add new data source
+
+6. Set url to `http://localhost:3100` then scroll down to the bottom and click save and test
+
+8. Click explore on the left menu and go to loki to ensure that it is working
+</Steps>
+
+### Configuring Alloy
+<Steps>
+1. Edit the Alloy configuration
+    ```bash title="Edit Alloy"
+    sudo vim /etc/alloy/config.alloy
+    ```
+
+2. Add the following [configurations](https://grafana.com/docs/agent/latest/flow/reference/components/loki.source.syslog/) at the bottom of the file to have it take in and forward logs from Nginx
+    ```bash title="Configure Alloy"
+    loki.source.syslog "nginx" {
+        listener {
+                address = "127.0.0.1:1514"
+                protocol = "udp"
+                syslog_format = "rfc3164"
+                labels = {
+                        job = "nginx",
+                }
+        }
+        forward_to = [loki.write.local.receiver]
+    }
+    loki.write "local" {
+        endpoint {
+            url = "http://127.0.0.1:3100/loki/api/v1/push"
+        }
+    }
+    ```
+    <Aside type="note">
+    We are using port 1514 to avoid needing to give additional privileges to Grafana Alloy to listen on port 514 and avoid conflicts with Rsyslog
+    </Aside>
+
+3. Save and exit the file then check the configuration using [Alloy validate](https://grafana.com/docs/alloy/latest/reference/cli/validate/)
+    ```bash title="Validate Alloy COnfiguration"
+    sudo alloy validate /etc/alloy/config.alloy
+    ```
+
+4. If there are no errors restart Alloy
+    ```bash title="Restart Alloy"
+    sudo systemctl restart alloy
+    ```
+</Steps>
+
+### Configuring Nginx
+<Steps>
+1. Install Nginx
+    ```bash title="Install Nginx"
+    sudo apt install nginx
+    ```
+
+3. Edit the Nginx default site
+    ```bash title="Edit Default Site"
+    sudo vim /etc/nginx/sites-enabled/default
+    ```
+
+4. In the `http` block add the following to enable [Nginx](https://nginx.org/en/docs/syslog.html) built-in logging syslog
+    ```
+    error_log syslog:server=127.0.0.1:1514;
+    access_log syslog:server=127.0.0.1:1514;
+    ```
+
+
+5. Save and exit then check if the configuration is valid
+    <Tabs>
+    <TabItem label="Command">
+    ```bash title="Check Nginx Configuration"
+    sudo nginx -t
+    ```
+    </TabItem>
+    <TabItem label="Example Output">
+    ```bash title="Check Nginx Configuration Example Output"
+    superexago@debian:~$ sudo nginx -t
+    nginx: the configuration file /etc/nginx/nginx.conf syntax is ok
+    nginx: configuration file /etc/nginx/nginx.conf test is successful
+    ```
+    </TabItem>
+    </Tabs>
+6. Reload Nginx for it to pull the updated file
+    ```bash title="Reload Nginx"
+    sudo systemctl reload nginx
+    ``` 
+
+7. Go to the default site to generate an access log by going to `localhost` in the browser
+</Steps>
+
+## View the Logs
+<Steps>
+1. Go back to Grafana at localhost:3000 -> explore -> then if it is not already on Loki set it to Loki
+
+2. Switch from builder to code in the [query](grafana.com/docs/loki/latest/query/) and put in `{job="nginx"}` to get all the logs that match the job label nginx
+
+3. You should see something like below
+    ```
+    2026-11-10 13:05:53.499 unk 127.0.0.1 - - [10/Nov/2026:13:05:53 -0500] "GET / HTTP/1.1" 304 0 "-" "Mozilla/5.0 (X11; Linux x86_64; rv:153.0) Gecko/20100101 Firefox/153.0" 
+    ```
+4. Click on the log then expand the subfields to see more of the data. Note the indexed label job which is what we used to query for the log.
+</Steps>
+5. You can also use Wireshark to view the UDP packets sent after the HTTP request is made since the default does not encrypt the log messages
