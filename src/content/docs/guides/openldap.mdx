@@ -1,0 +1,357 @@
+---
+title: "OpenLDAP"
+description: "A guide to the LDAP protocol and how to use it with OpenLDAP."
+date: 2026-11-17
+---
+
+import { Aside, Steps } from '@astrojs/starlight/components';
+
+## What you will need
+
+This project assumes that you have already followed our [Raspberry Pi installation](/guides/raspberrypi-os) project, and have the resulting configured Raspberry Pi. If you are installing on different hardware or a different OS, these steps may not all be the same for you.
+
+## System Setup
+
+Before continuing with the project, make sure your system is up to date.
+
+```bash title="Updating System"
+sudo apt update
+sudo apt upgrade -y
+```
+
+Install a text editor of your choice. Here we use `vim` as an example.
+
+```bash title="Installing Vim"
+sudo apt install vim
+```
+
+## Concepts
+
+### What is LDAP?
+
+The Lightweight Directory Access Protocol (LDAP) is a protocol for managing hierarchical data. It basically can store all the information things (and I mean that quite broadly) on your network.
+
+It can store information about:
+
+- Users
+- Credentials
+- Groups
+- Servers
+- And a whole lot more!
+
+### Directory Servers
+
+A **directory server** is a database that stores information using trees of entries. This operates much like a filesystem, where the branches of the tree are the folders in a filesystem, and the folders are at the end of each branch. 
+
+This will be a useful (albeit imperfect) analogy that we can use throughout our learning!
+
+### Entries
+
+An **entry** is a collection of information about an entity. Each entry consists of three elements:
+
+- A Distinguished Name (DN)
+- A Collection of Attributes
+- A Collection of Object Classes
+
+### Distinguished Names
+
+A **distinguished name** (DN) uniquely identifies an entry by uniquely identifying its location in the directory information tree (DIT) hierarchy. 
+
+This is like the absolute path to a file, which specifies both the name of the file AND the path to get to it.
+
+### Relative Distinguished Names
+
+The DN can be broken down into zero or more **relative distinguished names** (RDNs), which are a attribute-value pair like "uid=alvin.lin". Think of these as the file name / directories that make up the absolute path to a file.
+
+The RDNs of a DN are listed in descending order (the first is farthest from the root of the tree, the last is closest to the root of the tree)
+
+### Attributes
+
+The **attributes** of an entry are where the data about that entry is stored. They are all the actually useful information about a given entry in LDAP.
+
+The set of rules for what kinds of attributes should be assigned to a given entry is called a **schema**. A broad term for attributes, as well as other attribute-value pairs such as object classes, which we'll talk about in a bit, are **schema elements**.
+
+### User Attribute Examples
+
+- cn (Common Name): The full name of a person or the name of an object
+- givenName: The first name of the person
+- sn (Surname): The last name of the person
+- uid (User ID): The login name for the User
+- objectClass: : The schema type that defines what attributes an entry can or must have
+
+### Object Classes
+
+**Object Classes** are schema elements that indicate what kind of object an entry represents, as well as what attributes should be assigned to it.
+
+Every entry will have a structural object class, which indicates what kind of abject an entry represents, but an entry can also have additional object classes that suggest other attributes that this entry can have. 
+
+## Lab Time!!!
+
+### Install Packages
+
+Let's begin by installing the server and the main command line utilities we will be using:
+
+```bash title="Installing packages"
+sudo apt install slapd ldap-utils
+```
+
+The package slapd (the Stand-alone LDAP Daemon) creates a minimal working configuration with a top level entry, and an administrator’s Distinguished Name (DN)
+
+### Configuring the Base DN
+
+The **base DN** (or suffix) is the top-most entry in your directory tree. We can reconfigure slpad with:
+
+```bash title="Reconfigure slapd"
+sudo dpkg-reconfigure slapd
+```
+
+This will bring you to a reconfiguration wizard which allows you to configure the base setup of slapd.
+
+### Off to See the Wizard
+
+Counter-intuitively, at the first prompt click no.
+
+Next, it will prompt you to configure:
+
+- DNS Domain Name: This determines your suffix. We'll use \<hostname\>.com as our domain name
+- Organization Name: The name of the organization, stored as the o attribute of the base DN entry. To keep with theme, we can make this our hostname.
+- Administrator Password: I'll give you three guesses as to what this is. Make it something you'll remember!
+
+You can then move the old database when prompted, which we haven't even bothered configuring yet!
+
+### Configuring Defaults
+
+Throughout this guide we will issue many commands with the LDAP utilities. To save some typing, configure the OpenLDAP libraries with defaults by adding these lines in /etc/ldap/ldap.conf:
+
+```bash
+BASE dc=<hostname>,dc=com
+URI ldap:///
+```
+
+Now, commands like *ldapsearch -x -LLL -H ldap:/// -b dc=druid,dc=com dn* simplify to *ldapsearch -x -LLL dn*
+
+### Default Configuration Tree
+
+To see what the slapd-config DIT looks like via the LDAP protocol, listing only the DNs, run this command:
+
+```bash
+sudo ldapsearch -Q -LLL -Y EXTERNAL -H ldapi:/// -b cn=config dn
+```
+
+Flags/Options:
+- -Q: Quiet mode for the SASL authentication setup.
+- -LLL: Less verbose LDIF output. One “L” restricts output to LDIFv1; another disables comments; and the third one removes the LDIF version from the output.
+- -Y EXTERNAL: Select the EXTERNAL SASL mechanism for authentication.
+- -H ldapi:///: The URL to use to contact the server. In this case, it will use a local Unix socket.
+- -b cn=config: Start the search at the cn=config base.
+- dn: Only retrieve the dn attribute.
+
+### Seeing all Configurations
+
+To look at all the configuration that was performed by slapd, you can run:
+
+```bash
+sudo ldapsearch -Q -LLL -Y EXTERNAL -H ldapi:/// -b cn=config
+```
+
+This will be a suuuuuuuper long output because there are a whole lot of configurations set up behind the scenes!
+
+### Default Data Tree (the important tree)
+
+After installing the slapd package, a default data tree is configured, based on the detected domain name of the system. To see this we can run:
+
+```bash
+ldapsearch -x -LLL -H ldap:/// -b dc=<hostname>,dc=com dn
+```
+
+Or, more simply because we set up the base suffix and the URI:
+
+```
+ldapsearch -x -LLL dn
+```
+
+### Intro to Existentialism (ldapwhoami)
+
+A very handy tool to verify authentication is ldapwhoami, which can be used as follows:
+
+```bash
+ldapwhoami -x
+```
+
+Who are we currently reading from the database as?
+
+### Authenticated Requests
+
+Up until now, we've been viewing our (rather quite empty) database as a random anonymous person, but we want people to be able to actually login. We can test our ability to log in by logging in as the admin user that slapd set up for us:
+
+```bash
+ldapwhoami -x -D cn=admin,dc=<hostname>,dc=com -W
+```
+
+Now what is the result?
+
+### Populating our Directory
+
+Time to actually fill our database with database things! We're going to add a node for People, a node for groups, a user known as the mysterious Alvin Lin, a users group for Alvin to be in, as well as a grafana user in the grafana group, which we will talk about later.
+
+To do this create a .lidf file using:
+
+```bash
+vim add_content.lidf
+```
+
+Then add in the data:
+
+```
+dn: ou=People,dc=example,dc=com
+objectClass: organizationalUnit
+ou: People
+
+dn: ou=Groups,dc=example,dc=com
+objectClass: organizationalUnit
+ou: Groups
+
+dn: uid=grafana,ou=People,dc=example,dc=com
+objectClass: inetOrgPerson
+uid: grafana
+sn: grafana
+cn: grafana
+
+dn: cn=users,ou=Groups,dc=example,dc=com
+objectClass: posixGroup
+cn: users
+gidNumber: 10000
+memberUid: alvin
+
+dn: cn=grafana,ou=Groups,dc=example,dc=com
+objectClass: groupOfNames
+cn: grafana
+member: uid=alvin,ou=People,dc=example,dc=com
+
+dn: uid=alvin,ou=People,dc=example,dc=com
+objectClass: inetOrgPerson
+objectClass: posixAccount
+objectClass: shadowAccount
+uid: alvin
+sn: Lin
+cn: Alvin Lin
+displayname: Alvin Lin
+uidNumber: 10000
+gidNumber: 10000
+loginShell: /bin/bash
+homeDirectory: /home/alvin
+```
+
+We can test our new entries with this command:
+
+```bash
+ldapadd -n -v -f add_content.ldif
+``` 
+
+- -n (no-op): Does not actually add the the contents, just simulates what it would look like
+- -v (verbose): Prints more detailed output
+- -f (file): Specifies the input file, in our case "add_content.ldif"
+
+### BUT WAIT!! We have a problem!
+
+### Changing our .ldif suffix
+
+The template we took off of the website uses the suffix *dc=example,dc=com*, which is not what we use. To fix this, we can use the *sed* command, which is a very versatile command, but is used most frequently for substituting text in a file:
+
+```bash title="Substituting Suffix"
+sed -i 's/example/<hostname>/g' add_content.ldif
+```
+
+- -i: makes said replace the values in the file, usually it just prints the changes to stdout without this flag.
+- This command replaces all instances of "example" with \"\<hostname\>\"
+
+### Adding the Data
+
+In order to finally add these entries, we can run this command:
+
+```bash
+ldapadd -x -D cn=admin,dc=<hostname>,dc=com -W -f add_content.ldif
+```
+
+### Testing
+
+We can test that we added everything correctly using this command, which searches for alvin's entry and lists his cn and gidNumber:
+
+```bash
+ldapsearch -x -LLL -b ou=People,dc=<hostname>,dc=com '(uid=alvin)' cn gidNumber
+```
+
+### Setting Alvin's Password
+
+It's not very useful to have users if anyone can authenticate into their account, so lets do some fixing. We can set a password for alvin and graphana and test that password using these commands:
+
+```bash
+ldappasswd -x -D cn=admin,dc=<hostname>,dc=com -W -S uid=alvin,ou=people,dc=<hostname>,dc=com
+ldappasswd -x -D cn=admin,dc=<hostname>,dc=com -W -S uid=graphana,ou=people,dc=<hostname>,dc=com
+ldapwhoami -x -D uid=alvin,ou=people,dc=<hostname>,dc=com -W
+```
+
+IMPORTANT: Make sure you make your password for the graphana user "password", as it will be useful later.
+
+### Putting all this to use
+
+Now its time to actually show how any of this is useful (hopefully you already have some ideas on what this could be used for)
+
+What we're going to be using our very simple and underpopulated ldap server for is AUTHENTICATION, everyone's favorite thing!
+
+We'll use our server to authenticate into grafana, which we have utilized for multiple other labs.
+
+### Installing Grafana
+
+Run these commands in order to install grafana on your system:
+
+```bash title="Installing Grafana"
+sudo mkdir -p /etc/apt/keyrings/
+wget -q -O - https://apt.grafana.com/gpg.key | gpg --dearmor | sudo tee /etc/apt/keyrings/grafana.gpg > /dev/null
+echo "deb [signed-by=/etc/apt/keyrings/grafana.gpg] https://apt.grafana.com stable main" | sudo tee /etc/apt/sources.list.d/grafana.list
+sudo apt-get update
+sudo apt-get install -y grafana
+```
+
+### Starting Grafana
+
+And use these commands to start Grafana:
+
+```bash title="Starting Grafana"
+sudo /bin/systemctl enable grafana-server
+sudo /bin/systemctl start grafana-server
+```
+
+Now, you should be able to pull up Grafana on http://localhost:3000
+
+### Configuring Grafana
+
+The configuration files to use grafana with our ldap server are here:
+
+<p><a href="/files/graphana.ini" download>graphana.ini</a></p>
+<p><a href="/files/ldap.toml" download>ldap.toml</a></p>
+
+ldap.toml makes references to example.com, so lets fix that:
+
+```bash
+sed -i 's/dc=example/dc=<hostname>/g' ~/Downloads/ldap.toml
+```
+
+### Applying Configs
+
+Then you can copy these config files to their correct place using:
+
+```bash
+sudo cp ~/Downloads/graphana.ini /etc/grafana/graphana.ini
+sudo cp ~/Downloads/ldap.toml /etc/graphana/ldap.toml
+```
+
+And apply these changes by restarting grafana:
+
+```bash
+sudo /bin/systemctl restart grafana-server
+```
+
+### Testing our setup
+
+To test this, we can try logging in to graphana as Alvin. All we need to do is type in alvin's uid as the username and his password as the password, and hopefully we should be let in!
