@@ -2,6 +2,10 @@
 title: "OpenLDAP"
 description: "A guide to the LDAP protocol and how to use it with OpenLDAP."
 date: 2026-11-17
+sidebar:
+  badge:
+      text: New
+      variant: success
 ---
 
 import { Aside, Steps } from '@astrojs/starlight/components';
@@ -283,15 +287,15 @@ ldapsearch -x -LLL -b ou=People,dc=<hostname>,dc=com '(uid=alvin)' cn gidNumber
 
 ### Setting Alvin's Password
 
-It's not very useful to have users if anyone can authenticate into their account, so lets do some fixing. We can set a password for alvin and graphana and test that password using these commands:
+It's not very useful to have users if anyone can authenticate into their account, so lets do some fixing. We can set a password for alvin and grafana and test that password using these commands:
 
 ```bash
 ldappasswd -x -D cn=admin,dc=<hostname>,dc=com -W -S uid=alvin,ou=people,dc=<hostname>,dc=com
-ldappasswd -x -D cn=admin,dc=<hostname>,dc=com -W -S uid=graphana,ou=people,dc=<hostname>,dc=com
+ldappasswd -x -D cn=admin,dc=<hostname>,dc=com -W -S uid=grafana,ou=people,dc=<hostname>,dc=com
 ldapwhoami -x -D uid=alvin,ou=people,dc=<hostname>,dc=com -W
 ```
 
-IMPORTANT: Make sure you make your password for the graphana user "password", as it will be useful later.
+IMPORTANT: Make sure you make your password for the grafana user "password", as it will be useful later.
 
 ### Putting all this to use
 
@@ -328,7 +332,7 @@ Now, you should be able to pull up Grafana on http://localhost:3000
 
 The configuration files to use grafana with our ldap server are here:
 
-<p><a href="/files/graphana.ini" download>graphana.ini</a></p>
+<p><a href="/files/grafana.ini" download>grafana.ini</a></p>
 <p><a href="/files/ldap.toml" download>ldap.toml</a></p>
 
 ldap.toml makes references to example.com, so lets fix that:
@@ -342,8 +346,8 @@ sed -i 's/dc=example/dc=<hostname>/g' ~/Downloads/ldap.toml
 Then you can copy these config files to their correct place using:
 
 ```bash
-sudo cp ~/Downloads/graphana.ini /etc/grafana/graphana.ini
-sudo cp ~/Downloads/ldap.toml /etc/graphana/ldap.toml
+sudo cp ~/Downloads/grafana.ini /etc/grafana/grafana.ini
+sudo cp ~/Downloads/ldap.toml /etc/grafana/ldap.toml
 ```
 
 And apply these changes by restarting grafana:
@@ -354,4 +358,4 @@ sudo /bin/systemctl restart grafana-server
 
 ### Testing our setup
 
-To test this, we can try logging in to graphana as Alvin. All we need to do is type in alvin's uid as the username and his password as the password, and hopefully we should be let in!
+To test this, we can try logging in to grafana as Alvin. All we need to do is type in alvin's uid as the username and his password as the password, and hopefully we should be let in!
